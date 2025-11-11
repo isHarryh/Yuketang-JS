@@ -1,4 +1,5 @@
 import { AUDIO_DATA } from "./data.js";
+import { config } from "./config.js";
 
 export function log(msg) {
   console.log(`[Yuketang-JS] ${msg}`);
@@ -195,10 +196,29 @@ export class AudioController {
     this.currentAudioIndex = 0;
     this.audioElement = new Audio();
     this.currentAudioData = AUDIO_DATA[0];
-    this.customAudio = null;
     this._initializeAudio();
+    this._restoreConfig();
   }
 
+  /**
+   * Restore audio configuration from storage
+   * @private
+   */
+  _restoreConfig() {
+    const audioConfig = config.getAudioConfig();
+
+    // Restore selected audio
+    if (audioConfig.selected && audioConfig.selected.startsWith("preset:")) {
+      const presetId = parseInt(audioConfig.selected.split(":")[1]);
+      if (presetId >= 0 && presetId < AUDIO_DATA.length) {
+        this.currentAudioIndex = presetId;
+        this.currentAudioData = AUDIO_DATA[presetId];
+        log(`🎵 Preset audio restored: ${AUDIO_DATA[presetId].name}`);
+      }
+    }
+
+    this._initializeAudio();
+  }
   _initializeAudio() {
     if (this.currentAudioData && this.currentAudioData.data) {
       this.audioElement.src = this.currentAudioData.data;
@@ -247,30 +267,11 @@ export class AudioController {
 
     this.currentAudioIndex = newIndex;
     this.currentAudioData = AUDIO_DATA[newIndex];
-    this.customAudio = null;
     this._initializeAudio();
-    return true;
-  }
 
-  /**
-   * Add or replace custom audio from file data.
-   * @param {string} name - Custom audio name
-   * @param {string} data - Audio data URL or blob URL
-   */
-  addAudio(name, data) {
-    // Remove previous custom audio if exists
-    if (this.customAudio) {
-      if (this.customAudio.data.startsWith("blob:")) {
-        URL.revokeObjectURL(this.customAudio.data);
-      }
-      this.customAudio = null;
-    }
+    // Save to config
+    config.setSelectedAudio(`preset:${newIndex}`);
 
-    // Store new custom audio
-    this.customAudio = { name, data };
-    this.currentAudioData = this.customAudio;
-    this._initializeAudio();
-    log(`🎵 Custom audio added: ${name}`);
     return true;
   }
 }

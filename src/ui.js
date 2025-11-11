@@ -2,6 +2,7 @@ import $ from "jquery";
 import "bootstrap/dist/css/bootstrap.css";
 import * as bootstrap from "bootstrap";
 import { log, notify, audioController } from "./utils.js";
+import { config } from "./config.js";
 
 export class LessonHeaderUI {
   constructor() {
@@ -138,10 +139,6 @@ export class LessonHeaderUI {
       { id: 1, name: "默认提示音 2" },
     ];
 
-    // Create predefined audio options
-    const $presetSection = $(
-      `<div class="mb-4"><h6 class="mb-3">预设音频：</h6></div>`
-    );
     audioData.forEach((audio) => {
       const radioId = `yuketang-js-audio-${audio.id}`;
       const $radio = $(`
@@ -157,50 +154,21 @@ export class LessonHeaderUI {
         log(`🎵 Audio changed to: ${audio.name}`);
       });
 
-      $presetSection.append($radio);
-    });
-    $audioOptions.append($presetSection);
-
-    // Create custom audio option section
-    const $customSection = $(`
-      <div class="mb-3">
-        <h6 class="mb-3">自定义音频</h6>
-        <div class="form-check mb-2">
-          <input class="form-check-input" type="radio" name="yuketang-js-audio-select" id="yuketang-js-audio-custom" value="custom" />
-          <label class="form-check-label" for="yuketang-js-audio-custom">使用本地音频</label>
-        </div>
-        <div class="ms-4">
-          <label for="yuketang-js-audio-file-input" class="form-label small text-muted">选择音频文件：</label>
-          <input type="file" id="yuketang-js-audio-file-input" class="form-control form-control-sm" accept="audio/*" />
-        </div>
-      </div>
-    `);
-
-    $customSection.on("change", "#yuketang-js-audio-custom", (e) => {
-      if ($(e.target).is(":checked")) {
-        log("🎵 Custom audio mode enabled");
-      }
+      $audioOptions.append($radio);
     });
 
-    $customSection.on("change", "#yuketang-js-audio-file-input", (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const audioData = event.target.result;
-          audioController.addAudio(file.name, audioData);
-          // Auto-select custom audio option
-          $("#yuketang-js-audio-custom").prop("checked", true);
-          log(`🎵 Custom audio loaded: ${file.name}`);
-        };
-        reader.readAsDataURL(file);
-      }
-    });
-
-    $audioOptions.append($customSection);
-
-    // Set first option as default checked
-    $audioOptions.find("input[type='radio']").first().prop("checked", true);
+    // Restore configuration
+    const selectedAudio = config.getSelectedAudio();
+    if (selectedAudio && selectedAudio.startsWith("preset:")) {
+      const presetId = parseInt(selectedAudio.split(":")[1]);
+      $audioOptions
+        .find(`#yuketang-js-audio-${presetId}`)
+        .prop("checked", true);
+      log(`🎵 Restored preset audio: ${audioData[presetId]?.name}`);
+    } else {
+      // Default to first option
+      $audioOptions.find("input[type='radio']").first().prop("checked", true);
+    }
   }
 
   _updateStatusDisplay() {
