@@ -1,4 +1,5 @@
 import "./style.css";
+import $ from "jquery";
 import { R_HELLO, R_UNLOCK_PROBLEM, R_EXTEND_TIME } from "./enum.js";
 import { log, notify, wsMitm } from "./utils.js";
 
@@ -59,11 +60,6 @@ import { log, notify, wsMitm } from "./utils.js";
   }
 
   function ensureHeader() {
-    if (typeof $ === "undefined") {
-      log("⚠️ jQuery is not available, skipping header setup");
-      return;
-    }
-
     const $header = $(".lesson__header");
     if ($header.length === 0) {
       log("❓ lesson__header not found on this page");

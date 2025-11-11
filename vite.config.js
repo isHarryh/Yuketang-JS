@@ -14,11 +14,9 @@ export default defineConfig({
         license: "MIT",
         match: ["https://*.yuketang.cn/*"],
         grant: ["GM_notification"],
-        require: [
-          "https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.min.js",
-        ],
         source: "https://github.com/isHarryh/Yuketang-JS",
         namespace: "https://www.yuketang.cn/",
+        "run-at": "document-start",
       },
       server: {
         mountGmApi: true,
