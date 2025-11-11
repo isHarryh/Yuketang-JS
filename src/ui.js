@@ -1,12 +1,15 @@
 import $ from "jquery";
 import "bootstrap/dist/css/bootstrap.css";
-import { log, notify } from "./utils.js";
+import * as bootstrap from "bootstrap";
+import { log, notify, audioController } from "./utils.js";
 
 export class LessonHeaderUI {
   constructor() {
     this.$container = null;
     this.$statusText = null;
     this.$notifyBtn = null;
+    this.$settingsBtn = null;
+    this.$modal = null;
     this.lastActiveTime = null; // null means never active
   }
 
@@ -44,6 +47,7 @@ export class LessonHeaderUI {
       this.$container = $existing;
       this.$statusText = this.$container.find("#yuketang-js-status-text");
       this.$notifyBtn = this.$container.find("#yuketang-js-test-notification");
+      this.$settingsBtn = this.$container.find("#yuketang-js-settings-btn");
       return;
     }
 
@@ -58,16 +62,145 @@ export class LessonHeaderUI {
     )
       .text("发送测试通知")
       .click(() => {
-        notify(
-          "🆗 测试通知",
-          "【👉点我消除通知】恭喜！通知系统工作正常。（Yuketang-JS）"
-        );
+        notify("🆗 测试通知", "【点我消除通知】恭喜！通知系统工作正常。");
+        audioController.play();
       });
 
-    this.$container.append(this.$statusText).append(this.$notifyBtn);
+    this.$settingsBtn = $(
+      '<button id="yuketang-js-settings-btn" class="btn btn-sm btn-secondary"></button>'
+    )
+      .text("脚本设置")
+      .click(() => {
+        this._openSettingsModal();
+      });
+
+    this.$container
+      .append(this.$statusText)
+      .append(this.$notifyBtn)
+      .append(this.$settingsBtn);
     $header.append(this.$container);
 
+    // Inject modal
+    this._createModal();
+
     log("🔲 UI container added to lesson__header");
+  }
+
+  _createModal() {
+    if (this.$modal && this.$modal.length > 0) {
+      return;
+    }
+
+    const modalHtml = `
+      <div class="modal fade" id="yuketang-js-settings-modal" tabindex="-1" aria-labelledby="yuketang-js-settings-modal-label" aria-hidden="true">
+        <div class="modal-dialog">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h1 class="modal-title fs-5" id="yuketang-js-settings-modal-label">Yuketang-JS 脚本设置</h1>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <ul class="nav nav-tabs" id="yuketang-js-settings-tabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                  <button class="nav-link active" id="yuketang-js-classroom-alert-tab" data-bs-toggle="tab" data-bs-target="#yuketang-js-classroom-alert" type="button" role="tab" aria-controls="yuketang-js-classroom-alert" aria-selected="true">
+                    通知音频设置
+                  </button>
+                </li>
+              </ul>
+              <div class="tab-content" id="yuketang-js-settings-tabs-content">
+                <div class="tab-pane fade show active" id="yuketang-js-classroom-alert" role="tabpanel" aria-labelledby="yuketang-js-classroom-alert-tab">
+                  <div class="mt-3">
+                    <div class="d-flex gap-2 mb-3">
+                      <button id="yuketang-js-test-audio-btn" class="btn btn-sm btn-warning">测试音频播放</button>
+                      <button id="yuketang-js-stop-audio-btn" class="btn btn-sm btn-warning">停止所有音频</button>
+                    </div>
+                    <h5>选择音频</h5>
+                    <div id="yuketang-js-audio-options"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    $("body").append(modalHtml);
+    this.$modal = $("#yuketang-js-settings-modal");
+
+    this._populateAudioOptions();
+  }
+
+  _populateAudioOptions() {
+    const $audioOptions = $("#yuketang-js-audio-options");
+    const audioData = [
+      { id: 0, name: "默认提示音 1" },
+      { id: 1, name: "默认提示音 2" },
+    ];
+
+    // Create predefined audio options
+    const $presetSection = $(
+      `<div class="mb-4"><h6 class="mb-3">预设音频：</h6></div>`
+    );
+    audioData.forEach((audio) => {
+      const radioId = `yuketang-js-audio-${audio.id}`;
+      const $radio = $(`
+        <div class="form-check">
+          <input class="form-check-input" type="radio" name="yuketang-js-audio-select" id="${radioId}" value="${audio.id}" />
+          <label class="form-check-label" for="${radioId}">${audio.name}</label>
+        </div>
+      `);
+
+      $radio.on("change", (e) => {
+        const selectedId = parseInt($(e.target).val());
+        audioController.setAudio(selectedId);
+        log(`🎵 Audio changed to: ${audio.name}`);
+      });
+
+      $presetSection.append($radio);
+    });
+    $audioOptions.append($presetSection);
+
+    // Create custom audio option section
+    const $customSection = $(`
+      <div class="mb-3">
+        <h6 class="mb-3">自定义音频</h6>
+        <div class="form-check mb-2">
+          <input class="form-check-input" type="radio" name="yuketang-js-audio-select" id="yuketang-js-audio-custom" value="custom" />
+          <label class="form-check-label" for="yuketang-js-audio-custom">使用本地音频</label>
+        </div>
+        <div class="ms-4">
+          <label for="yuketang-js-audio-file-input" class="form-label small text-muted">选择音频文件：</label>
+          <input type="file" id="yuketang-js-audio-file-input" class="form-control form-control-sm" accept="audio/*" />
+        </div>
+      </div>
+    `);
+
+    $customSection.on("change", "#yuketang-js-audio-custom", (e) => {
+      if ($(e.target).is(":checked")) {
+        log("🎵 Custom audio mode enabled");
+      }
+    });
+
+    $customSection.on("change", "#yuketang-js-audio-file-input", (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const audioData = event.target.result;
+          audioController.addAudio(file.name, audioData);
+          // Auto-select custom audio option
+          $("#yuketang-js-audio-custom").prop("checked", true);
+          log(`🎵 Custom audio loaded: ${file.name}`);
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+
+    $audioOptions.append($customSection);
+
+    // Set first option as default checked
+    $audioOptions.find("input[type='radio']").first().prop("checked", true);
   }
 
   _updateStatusDisplay() {
@@ -99,5 +232,29 @@ export class LessonHeaderUI {
         .removeClass("bg-danger bg-secondary")
         .addClass("bg-info");
     }
+  }
+
+  _openSettingsModal() {
+    if (!this.$modal || this.$modal.length === 0) {
+      this._createModal();
+    }
+
+    // Attach button event listeners
+    $("#yuketang-js-test-audio-btn")
+      .off("click")
+      .on("click", () => {
+        audioController.play();
+        log("▶️ Test audio playback triggered");
+      });
+
+    $("#yuketang-js-stop-audio-btn")
+      .off("click")
+      .on("click", () => {
+        audioController.stop();
+        log("⏹️ All audio stopped");
+      });
+
+    const modalInstance = new bootstrap.Modal(this.$modal[0]);
+    modalInstance.show();
   }
 }

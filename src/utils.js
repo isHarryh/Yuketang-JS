@@ -1,3 +1,5 @@
+import { AUDIO_DATA } from "./data.js";
+
 export function log(msg) {
   console.log(`[Yuketang-JS] ${msg}`);
 }
@@ -187,3 +189,90 @@ export class WsMitm {
 }
 
 export const wsMitm = new WsMitm();
+
+export class AudioController {
+  constructor() {
+    this.currentAudioIndex = 0;
+    this.audioElement = new Audio();
+    this.currentAudioData = AUDIO_DATA[0];
+    this.customAudio = null;
+    this._initializeAudio();
+  }
+
+  _initializeAudio() {
+    if (this.currentAudioData && this.currentAudioData.data) {
+      this.audioElement.src = this.currentAudioData.data;
+    }
+  }
+
+  _isPlaying() {
+    return !this.audioElement.paused;
+  }
+
+  /**
+   * Plays the audio.
+   * If the previous audio is still playing, this play request will be ignored.
+   */
+  play() {
+    if (!this._isPlaying()) {
+      this.audioElement.currentTime = 0;
+      this.audioElement.play().catch((err) => {
+        log("❌ Audio play error:", err);
+      });
+    }
+  }
+
+  stop() {
+    this.audioElement.pause();
+    this.audioElement.currentTime = 0;
+  }
+
+  /**
+   * Switches to a different audio by name or index.
+   * @param {string|number} nameOrIndex - Audio name or index
+   */
+  setAudio(nameOrIndex) {
+    let newIndex = -1;
+
+    if (typeof nameOrIndex === "number") {
+      newIndex = nameOrIndex;
+    } else if (typeof nameOrIndex === "string") {
+      newIndex = AUDIO_DATA.findIndex((audio) => audio.name === nameOrIndex);
+    }
+
+    if (newIndex < 0 || newIndex >= AUDIO_DATA.length) {
+      console.error(`Audio] Invalid audio index or name: ${nameOrIndex}`);
+      return false;
+    }
+
+    this.currentAudioIndex = newIndex;
+    this.currentAudioData = AUDIO_DATA[newIndex];
+    this.customAudio = null;
+    this._initializeAudio();
+    return true;
+  }
+
+  /**
+   * Add or replace custom audio from file data.
+   * @param {string} name - Custom audio name
+   * @param {string} data - Audio data URL or blob URL
+   */
+  addAudio(name, data) {
+    // Remove previous custom audio if exists
+    if (this.customAudio) {
+      if (this.customAudio.data.startsWith("blob:")) {
+        URL.revokeObjectURL(this.customAudio.data);
+      }
+      this.customAudio = null;
+    }
+
+    // Store new custom audio
+    this.customAudio = { name, data };
+    this.currentAudioData = this.customAudio;
+    this._initializeAudio();
+    log(`🎵 Custom audio added: ${name}`);
+    return true;
+  }
+}
+
+export const audioController = new AudioController();

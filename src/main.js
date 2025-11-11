@@ -1,6 +1,6 @@
 import "./style.css";
 import { R_HELLO, R_UNLOCK_PROBLEM, R_EXTEND_TIME } from "./enum.js";
-import { log, notify, wsMitm } from "./utils.js";
+import { log, notify, wsMitm, audioController } from "./utils.js";
 import { LessonHeaderUI } from "./ui.js";
 
 (function () {
@@ -27,12 +27,14 @@ import { LessonHeaderUI } from "./ui.js";
             "⏰ 新的题目",
             `【👉点我消除通知】新的题目已解锁！限时 ${limit} 秒。（Yuketang-JS）`
           );
+          audioController.play();
         } else if (json.op === R_EXTEND_TIME) {
           const extend = json.problem ? json.problem.extend || "N/A" : "N/A";
           notify(
             "⏰ 题目延时",
             `【👉点我消除通知】题目时间已延长 ${extend} 秒。（Yuketang-JS）`
           );
+          audioController.play();
         }
       }
     } catch (error) {
