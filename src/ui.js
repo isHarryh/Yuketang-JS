@@ -1,4 +1,5 @@
 import $ from "jquery";
+import "bootstrap/dist/css/bootstrap.css";
 import { log, notify } from "./utils.js";
 
 export class LessonHeaderUI {
@@ -46,9 +47,15 @@ export class LessonHeaderUI {
       return;
     }
 
-    this.$container = $('<div id="yuketang-js-ui-container"></div>');
-    this.$statusText = $('<span id="yuketang-js-status-text"></span>');
-    this.$notifyBtn = $('<button id="yuketang-js-test-notification"></button>')
+    this.$container = $(
+      '<div id="yuketang-js-ui-container" class="d-inline-flex align-items-center gap-2"></div>'
+    );
+    this.$statusText = $(
+      '<span id="yuketang-js-status-text" class="badge"></span>'
+    );
+    this.$notifyBtn = $(
+      '<button id="yuketang-js-test-notification" class="btn btn-sm btn-primary"></button>'
+    )
       .text("发送测试通知")
       .click(() => {
         notify(
@@ -70,7 +77,10 @@ export class LessonHeaderUI {
 
     // If never active
     if (this.lastActiveTime === null) {
-      this.$statusText.text("未监听").css("color", "#dd3344");
+      this.$statusText
+        .text("未监听")
+        .removeClass("bg-secondary bg-info")
+        .addClass("bg-danger");
       return;
     }
 
@@ -79,9 +89,15 @@ export class LessonHeaderUI {
     const timeSinceActive = now - this.lastActiveTime;
 
     if (timeSinceActive > inactiveThreshold) {
-      this.$statusText.text("无活动").css("color", "#888899");
+      this.$statusText
+        .text("无活动")
+        .removeClass("bg-danger bg-info")
+        .addClass("bg-secondary");
     } else {
-      this.$statusText.text("已监听").css("color", "#2288ee");
+      this.$statusText
+        .text("已监听")
+        .removeClass("bg-danger bg-secondary")
+        .addClass("bg-info");
     }
   }
 }
