@@ -8,14 +8,6 @@
   display: inline-block;
 }
 
-#yuketang-js-status-text.listening {
-  color: #28a745;
-}
-
-#yuketang-js-status-text.not-listening {
-  color: #dc3545;
-}
-
 /* Yuketang-JS Test Notification Button */
 #yuketang-js-test-notification {
   margin: 4px;
