@@ -28,7 +28,7 @@ Yuketang-JS 是一个 Tampermonkey 用户脚本，运行在雨课堂（yuketang.
 - 桌面通知 + 音频提醒
 - 提供设置界面，支持多标签页配置同步检测
 
-技术栈：TypeScript + Vite + vite-plugin-monkey + jQuery + Bootstrap + OpenAI SDK。
+技术栈：TypeScript + Vite + vite-plugin-monkey + jQuery + Bootstrap + OpenAI SDK + Anthropic SDK + marked + KaTeX。
 
 ## 代码结构
 
@@ -38,12 +38,18 @@ src/
 ├── config.ts                   配置管理（GM 存储读写、哈希校验、跨标签页监测）
 ├── enum.ts                     WebSocket 协议常量（op 字段值）
 ├── data.ts                     内嵌的 base64 音频数据
+├── problem-types.ts            题型常量（单选/多选/投票/填空/主观/判断）
 ├── problem-solver.ts           LLM 自动答题引擎
+├── llm-client.ts               LLM 调用封装 callLlm()，按 llm.provider 分发到 OpenAI 兼容或 Anthropic Messages API，支持附带图片
+├── answer-log.ts               答题日志存储（GM 键 yuketang-js-answer-log，按 problemId 一条记录，保留最近 50 条，跨标签页共享）
 ├── vite-env.d.ts               TypeScript 环境类型声明
 │
 ├── ui/
+│   ├── answer-confirm-modal.ts 自动答题确认框（可改答案后再提交，多题排队）
+│   ├── answer-log-modal.ts     答题日志查看窗口（时间线、提示词、PPT 截图、原始回复，实时刷新）
 │   ├── banner.ts               页面顶部 toast 通知横幅
-│   ├── header.ts               课堂页面头部 UI（状态徽章 + 通知测试 + 设置按钮）
+│   ├── solution-panel.ts       右侧浮窗，显示主观题解题过程（Markdown + KaTeX，可收起/多题切换/重新生成）
+│   ├── header.ts               课堂页面头部 UI（状态徽章 + 通知测试 + 答题日志 + 设置按钮）
 │   ├── general-header.ts       通用页面头部 UI（仅设置按钮，适配 .headerButtonGroup）
 │   └── settings-modal.ts       设置模态框（音频/LLM/自动答题三个 tab）+ 配置过期警告
 │
@@ -51,6 +57,8 @@ src/
     ├── log.ts                  控制台日志（带 [Yuketang-JS] 前缀，无依赖）
     ├── notify.ts               桌面通知（GM_notification 封装）
     ├── audio-controller.ts     音频播放控制器（单例）
+    ├── markdown-math.ts        Markdown + LaTeX 渲染（marked + KaTeX；先抽出公式再解析 Markdown；原始 HTML 一律转义；KaTeX 字体走 jsdelivr CDN）
+    ├── slide-image.ts          下载 PPT 页图片（GM_xmlhttpRequest 绕过 CORS），缩放到长边 1568 并转 base64 JPEG
     ├── ws-mitm.ts              WebSocket 中间人拦截器（单例）
     └── xhr-spy.ts              XHR 响应拦截器（静态类）
 ```
@@ -58,7 +66,7 @@ src/
 ### 依赖关系图
 
 ```
-enum.ts, data.ts          (叶子节点，无依赖)
+enum.ts, data.ts, problem-types.ts   (叶子节点，无依赖)
      │
 utils/log.ts              (叶子节点，无依赖)
      │
@@ -68,6 +76,7 @@ utils/log.ts              (叶子节点，无依赖)
                                       │
 config.ts ────────────────────────────┘
      │
+     ├── llm-client.ts  (被 settings-modal.ts 和 problem-solver.ts 使用)
      └── ui/settings-modal.ts
               │
               ├── ui/header.ts
@@ -75,6 +84,7 @@ config.ts ───────────────────────�
                       │
 ui/banner.ts          │
      │                │
+     ├── ui/answer-confirm-modal.ts
      └── problem-solver.ts
                │
 main.ts ───────┘  (顶层编排)
@@ -86,7 +96,7 @@ main.ts ───────┘  (顶层编排)
 
 ### 脚本启动流程（main.ts）
 
-1. **XHR 拦截注册**：`XHRSpy` 监听 `/lesson/presentation/fetch` 响应，从返回的 slides 中提取题目信息，存入 `problemSolver`
+1. **XHR 拦截注册**：`XHRSpy` 监听 `/lesson/presentation/fetch` 响应，从返回的 slides 中提取题目信息（含页图 `slide.cover || slide.thumbnail`，字段名未经官方文档确认），存入 `problemSolver`
 2. **UI 初始化**：创建 `LessonHeaderUI` 和 `GeneralHeaderUI` 实例（各自按需注入 DOM）
 3. **WebSocket MITM 启动**：`wsMitm.startMitm(".*wsapp.*")` 替换全局 WebSocket，开始拦截
 4. **注册消息回调**：
@@ -100,14 +110,21 @@ main.ts ───────┘  (顶层编排)
 
 ```
 题目解锁 → scheduleAutoAnswer(problemId, limit)
+  ├── 主观题（problemType = 5）：handleShortAnswer() 不提交；shortAnswerSolution 开启时立即
+  │     generateSolution() → 用 buildSolutionPrompt 请求 LLM → 结果显示在 solutionPanel 浮窗
   ├── 限时题目：delay = max(0, limit - timeLeftThreshold) 秒
   └── 不限时题目：delay = timeAfterSend 秒
         │
         └── setTimeout → problemSolver.handleProblem(problemId)
-              ├── 调用 LLM（OpenAI 兼容接口）获取答案
+              ├── includeSlideImage 开启：fetchSlideImage() 获取题目所在页截图
+              ├── callLlm() 调用 LLM 获取答案（OpenAI 兼容 / Anthropic，由设置中的「接口类型」决定）
+              │     └── 带图请求返回 4xx（401/403/429 除外）时，自动改为纯文字重试一次
               ├── 解析 JSON 数组格式的答案
+              ├── confirmBeforeSubmit 开启：弹出确认框，可改答案；取消则不提交
               └── POST 到 /api/v3/lesson/problem/answer 提交
 ```
+
+每个关键步骤都会调用 `answerLog.event(problem, level, message, { detail, patch })` 写入答题日志；新增步骤时同步补充日志。
 
 ### 多标签页配置同步
 
