@@ -3,10 +3,10 @@ import "bootstrap/dist/css/bootstrap.css";
 import * as bootstrap from "bootstrap";
 import { log } from "../utils/log.js";
 import { audioController } from "../utils/audio-controller.js";
-import { config } from "../config.js";
+import { config, type LlmProvider } from "../config.js";
 import { FINGERPRINT_OPTIONS } from "../constants.js";
 import { showToast } from "./banner.js";
-import OpenAI from "openai";
+import { callLlm } from "../llm-client.js";
 
 export function showStaleConfigWarning(): void {
   const modalId = "yuketang-js-stale-config-modal";
@@ -228,6 +228,13 @@ class SettingsModal {
                     <h6 class="fw-semibold border-bottom pb-2 mb-3">大模型配置</h6>
                     <div class="rounded px-3 py-2 mb-3" style="background: #f8f9fa;">
                       <div class="mb-2">
+                        <label for="yuketang-js-llm-provider" class="form-label fw-medium mb-1">接口类型</label>
+                        <select class="form-select form-select-sm" id="yuketang-js-llm-provider">
+                          <option value="openai">OpenAI 兼容（Chat Completions）</option>
+                          <option value="anthropic">Anthropic（Messages API）</option>
+                        </select>
+                      </div>
+                      <div class="mb-2">
                         <label for="yuketang-js-llm-baseurl" class="form-label fw-medium mb-1">API Base URL</label>
                         <input type="text" class="form-control form-control-sm" id="yuketang-js-llm-baseurl" placeholder="https://...">
                       </div>
@@ -345,18 +352,34 @@ class SettingsModal {
 
   private _populateLlmOptions(): void {
     const llmConfig = config.getLlmConfig();
+    const $provider = $("#yuketang-js-llm-provider");
     const $baseUrl = $("#yuketang-js-llm-baseurl");
     const $apiKey = $("#yuketang-js-llm-apikey");
     const $model = $("#yuketang-js-llm-model");
     const $reasoning = $("#yuketang-js-llm-reasoning");
 
+    const updatePlaceholders = () => {
+      if ($provider.val() === "anthropic") {
+        $baseUrl.attr("placeholder", "https://api.anthropic.com");
+        $apiKey.attr("placeholder", "sk-ant-xxxxxx");
+        $model.attr("placeholder", "claude-opus-5-5");
+      } else {
+        $baseUrl.attr("placeholder", "https://...");
+        $apiKey.attr("placeholder", "sk-xxxxxx");
+        $model.attr("placeholder", "");
+      }
+    };
+
+    $provider.val(llmConfig.provider);
     $baseUrl.val(llmConfig.baseUrl);
     $apiKey.val(llmConfig.apiKey);
     $model.val(llmConfig.model);
     $reasoning.val(llmConfig.reasoningEffort);
+    updatePlaceholders();
 
     const updateConfig = () => {
       config.setLlmConfig({
+        provider: $provider.val() as LlmProvider,
         baseUrl: $baseUrl.val() as string,
         apiKey: $apiKey.val() as string,
         model: $model.val() as string,
@@ -364,6 +387,10 @@ class SettingsModal {
       });
     };
 
+    $provider.on("change", () => {
+      updatePlaceholders();
+      updateConfig();
+    });
     $baseUrl.on("change", updateConfig);
     $apiKey.on("change", updateConfig);
     $model.on("change", updateConfig);
@@ -392,11 +419,6 @@ class SettingsModal {
     };
 
     $("#yuketang-js-llm-test-btn").on("click", async () => {
-      const baseUrl = $baseUrl.val() as string;
-      const apiKey = $apiKey.val() as string;
-      const model = $model.val() as string;
-      const reasoningEffort = $reasoning.val() as string;
-
       if (!config.isLlmConfigAvailable()) {
         showTestResult(
           "warning",
@@ -406,30 +428,19 @@ class SettingsModal {
         return;
       }
 
-      const openai = new OpenAI({
-        baseURL: baseUrl,
-        apiKey: apiKey,
-        dangerouslyAllowBrowser: true,
-      });
-
       const btn = $("#yuketang-js-llm-test-btn");
       btn.prop("disabled", true);
       btn.text("测试中...");
       $("#yuketang-js-llm-test-result").addClass("d-none");
 
       try {
-        const completion = await openai.chat.completions.create({
-          messages: [
-            { role: "system", content: "You are a helpful assistant." },
-            { role: "user", content: 'If you can see this, please say "OK".' },
-          ],
-          model: model,
-          thinking: { type: "enabled" },
-          reasoning_effort: reasoningEffort,
-          stream: false,
-        } as any);
-
-        const reply = completion.choices[0]?.message?.content || "(空回复)";
+        const reply =
+          (
+            await callLlm(config.getLlmConfig(), {
+              system: "You are a helpful assistant.",
+              user: 'If you can see this, please say "OK".',
+            })
+          ).text || "(空回复)";
         showTestResult("success", "测试通过", reply);
       } catch (e: any) {
         showTestResult("danger", "测试失败", e.message);
