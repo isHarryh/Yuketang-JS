@@ -13,6 +13,7 @@ import { LessonHeaderUI } from "./ui/header.js";
 import { GeneralHeaderUI } from "./ui/general-header.js";
 import { showToast } from "./ui/banner.js";
 import { problemSolver } from "./problem-solver.js";
+import { isShortAnswerProblem } from "./problem-types.js";
 import { config } from "./config.js";
 
 (function (): void {
@@ -60,6 +61,11 @@ import { config } from "./config.js";
     const problem = problemSolver.getProblem(problemId);
 
     if (aaConfig.enabled && problem && !problem.hasAutoAnswered) {
+      if (isShortAnswerProblem(problem.problemType)) {
+        problemSolver.skipShortAnswer(problemId);
+        return;
+      }
+
       const numLimit = typeof limit === "string" ? parseInt(limit, 10) : limit;
       let delayMs = 0;
       if (isNaN(numLimit) || numLimit <= 0) {

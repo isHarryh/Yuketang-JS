@@ -18,6 +18,7 @@ interface AutoAnswerConfig {
   enabled: boolean;
   timeLeftThreshold: number;
   timeAfterSend: number;
+  confirmBeforeSubmit: boolean;
 }
 
 interface EventListenersConfig {
@@ -58,6 +59,7 @@ const DEFAULT_CONFIG: Config = {
     enabled: false,
     timeLeftThreshold: 300,
     timeAfterSend: 10,
+    confirmBeforeSubmit: false,
   },
   eventListeners: {
     unlockProblem: true,
@@ -123,6 +125,9 @@ class ConfigManager {
         timeAfterSend:
           loaded.autoAnswer?.timeAfterSend ??
           DEFAULT_CONFIG.autoAnswer.timeAfterSend,
+        confirmBeforeSubmit:
+          loaded.autoAnswer?.confirmBeforeSubmit ??
+          DEFAULT_CONFIG.autoAnswer.confirmBeforeSubmit,
       },
       eventListeners: {
         unlockProblem:
