@@ -23,6 +23,7 @@ interface AutoAnswerConfig {
   timeAfterSend: number;
   confirmBeforeSubmit: boolean;
   includeSlideImage: boolean;
+  shortAnswerSolution: boolean;
 }
 
 interface EventListenersConfig {
@@ -66,6 +67,7 @@ const DEFAULT_CONFIG: Config = {
     timeAfterSend: 10,
     confirmBeforeSubmit: false,
     includeSlideImage: true,
+    shortAnswerSolution: true,
   },
   eventListeners: {
     unlockProblem: true,
@@ -138,6 +140,9 @@ class ConfigManager {
         includeSlideImage:
           loaded.autoAnswer?.includeSlideImage ??
           DEFAULT_CONFIG.autoAnswer.includeSlideImage,
+        shortAnswerSolution:
+          loaded.autoAnswer?.shortAnswerSolution ??
+          DEFAULT_CONFIG.autoAnswer.shortAnswerSolution,
       },
       eventListeners: {
         unlockProblem:

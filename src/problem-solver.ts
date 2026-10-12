@@ -14,6 +14,7 @@ import {
 } from "./llm-client.js";
 import { fetchSlideImage } from "./utils/slide-image.js";
 import { answerLog } from "./answer-log.js";
+import { solutionPanel } from "./ui/solution-panel.js";
 
 export interface ExtractedProblem {
   problemId: string;
@@ -24,6 +25,32 @@ export interface ExtractedProblem {
   slideImageUrl?: string;
   hasAutoAnswered?: boolean;
   autoAnswerInProgress?: boolean;
+  solutionInProgress?: boolean;
+}
+
+type PromptBuilder = (problem: ExtractedProblem, withImage: boolean) => string;
+
+function buildSolutionPrompt(
+  problem: ExtractedProblem,
+  withImage: boolean,
+): string {
+  return `
+You are an expert tutor. Below is a subjective (short-answer) question from a class quiz. The student will copy your solution by hand onto an answer sheet and upload a photo of it.
+
+Write a complete model solution that is ready to be copied onto paper:
+- Write in the same language as the question (a Chinese question gets a Chinese answer).
+- Show the key reasoning steps clearly and concisely, the way a model answer looks on paper. No greetings, meta commentary, or restating these instructions.
+- Use LaTeX for all math: $...$ for inline and $$...$$ for display equations.
+- Use Markdown for structure (numbered steps, bold for key results). No tables, code blocks, or HTML.
+- End with a clearly marked final answer or conclusion.
+- If the question is open-ended (discussion, opinion, explanation), give a well-organized answer with clear key points.
+${withImage ? `- The attached image is a screenshot of the slide containing this question. Use it for figures, formulas, and any content missing from the text below.` : ""}
+
+Problem:
+<problem>
+${problem.body}
+</problem>
+`;
 }
 
 function buildPrompt(problem: ExtractedProblem, withImage: boolean): string {
@@ -83,9 +110,9 @@ export class ProblemSolver {
   }
 
   /**
-   * Short-answer problems need a handwritten photo upload, so they are never submitted.
+   * Short-answer problems are never submitted; optionally generate a solution for the user to copy by hand.
    */
-  skipShortAnswer(problemId: string): void {
+  handleShortAnswer(problemId: string): void {
     const problem = this.getProblem(problemId);
     if (!problem || problem.hasAutoAnswered) {
       return;
@@ -95,11 +122,52 @@ export class ProblemSolver {
     answerLog.event(problem, "warning", "主观题需要手写拍照上传，不会自动提交", {
       patch: { status: "skipped" },
     });
+
+    const willGenerate =
+      config.getAutoAnswerConfig().shortAnswerSolution &&
+      config.isLlmConfigAvailable();
     showToast(
       "warning",
       "自动答题",
-      "这是主观题（简答），需要手写并拍照上传，已跳过自动答题",
+      willGenerate
+        ? "这是主观题（简答），需要手写并拍照上传，不会自动提交。正在生成解题过程，完成后显示在右侧浮窗"
+        : "这是主观题（简答），需要手写并拍照上传，已跳过自动答题",
     );
+    if (willGenerate) {
+      void this.generateSolution(problem);
+    }
+  }
+
+  async generateSolution(problem: ExtractedProblem): Promise<void> {
+    if (problem.solutionInProgress) {
+      return;
+    }
+    problem.solutionInProgress = true;
+    const llmConfig = config.getLlmConfig();
+    solutionPanel.setLoading(problem, () => {
+      void this.generateSolution(problem);
+    });
+    log(`📝 Generating solution for short-answer problem ${problem.problemId}...`);
+    answerLog.event(problem, "info", "开始生成主观题解题过程（不会提交）", {
+      patch: { provider: llmConfig.provider, model: llmConfig.model },
+    });
+
+    try {
+      const reply = await this.askLlm(problem, buildSolutionPrompt);
+      if (!reply.text.trim()) {
+        throw new Error("大模型返回了空内容");
+      }
+      solutionPanel.setSolution(problem.problemId, reply.text);
+      log(`✅ Solution generated for ${problem.problemId}`);
+      answerLog.event(problem, "success", "解题过程已生成，显示在右侧浮窗");
+      showToast("success", "解题过程", "主观题解题过程已生成，请查看右侧浮窗");
+    } catch (err: any) {
+      log(`❌ Failed to generate solution for ${problem.problemId}: ${err.message}`);
+      solutionPanel.setError(problem.problemId, err.message);
+      answerLog.event(problem, "danger", "生成解题过程失败", { detail: err.message });
+    } finally {
+      problem.solutionInProgress = false;
+    }
   }
 
   async handleProblem(problemId: string): Promise<void> {
@@ -110,7 +178,7 @@ export class ProblemSolver {
     }
 
     if (isShortAnswerProblem(problem.problemType)) {
-      this.skipShortAnswer(problemId);
+      this.handleShortAnswer(problemId);
       return;
     }
 
@@ -162,12 +230,15 @@ export class ProblemSolver {
     }
   }
 
-  private async askLlm(problem: ExtractedProblem): Promise<LlmReply> {
+  private async askLlm(
+    problem: ExtractedProblem,
+    build: PromptBuilder = buildPrompt,
+  ): Promise<LlmReply> {
     const llmConfig = config.getLlmConfig();
     const images = await this.loadSlideImages(problem);
 
     const send = async (withImages: boolean): Promise<LlmReply> => {
-      const prompt = buildPrompt(problem, withImages);
+      const prompt = build(problem, withImages);
       answerLog.event(
         problem,
         "info",

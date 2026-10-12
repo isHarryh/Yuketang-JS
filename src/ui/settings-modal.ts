@@ -218,6 +218,11 @@ class SettingsModal {
                         <label class="form-check-label" for="yuketang-js-aa-slide-image">同时发送题目所在页的 PPT 截图</label>
                         <div class="form-text">需要模型支持图片输入。如果带截图的请求被拒绝，会自动改为只发送文字重试。</div>
                       </div>
+                      <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="yuketang-js-aa-short-solution">
+                        <label class="form-check-label" for="yuketang-js-aa-short-solution">主观题生成解题过程</label>
+                        <div class="form-text">主观题不会自动提交。开启后，题目解锁时立即请求大模型生成解题过程（支持公式渲染），显示在页面右侧浮窗里，方便抄到答题纸上。</div>
+                      </div>
                       <div class="mb-2">
                         <label for="yuketang-js-aa-time-left" class="form-label fw-medium mb-1">限时题目在截止前多少秒启动自动答题</label>
                         <input type="number" class="form-control form-control-sm" id="yuketang-js-aa-time-left" value="30">
@@ -337,12 +342,14 @@ class SettingsModal {
     const $enabled = $("#yuketang-js-aa-enabled");
     const $confirm = $("#yuketang-js-aa-confirm");
     const $slideImage = $("#yuketang-js-aa-slide-image");
+    const $shortSolution = $("#yuketang-js-aa-short-solution");
     const $timeLeft = $("#yuketang-js-aa-time-left");
     const $timeAfter = $("#yuketang-js-aa-time-after");
 
     $enabled.prop("checked", aaConfig.enabled);
     $confirm.prop("checked", aaConfig.confirmBeforeSubmit);
     $slideImage.prop("checked", aaConfig.includeSlideImage);
+    $shortSolution.prop("checked", aaConfig.shortAnswerSolution);
     $timeLeft.val(aaConfig.timeLeftThreshold);
     $timeAfter.val(aaConfig.timeAfterSend);
 
@@ -351,6 +358,7 @@ class SettingsModal {
         enabled: Boolean($enabled.prop("checked")),
         confirmBeforeSubmit: Boolean($confirm.prop("checked")),
         includeSlideImage: Boolean($slideImage.prop("checked")),
+        shortAnswerSolution: Boolean($shortSolution.prop("checked")),
         timeLeftThreshold: parseInt($timeLeft.val() as string, 10) || 30,
         timeAfterSend: parseInt($timeAfter.val() as string, 10) || 15,
       });
@@ -359,6 +367,7 @@ class SettingsModal {
     $enabled.on("change", updateConfig);
     $confirm.on("change", updateConfig);
     $slideImage.on("change", updateConfig);
+    $shortSolution.on("change", updateConfig);
     $timeLeft.on("change", updateConfig);
     $timeAfter.on("change", updateConfig);
 
