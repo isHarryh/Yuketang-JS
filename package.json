@@ -16,6 +16,7 @@
     "vite-plugin-monkey": "^7.1.9"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "bootstrap": "^5.3.8",
     "jquery": "^3.7.1",
     "openai": "^6.35.0"

@@ -6,7 +6,7 @@ import {
   getProblemTypeName,
   isShortAnswerProblem,
 } from "./problem-types.js";
-import OpenAI from "openai";
+import { callLlm } from "./llm-client.js";
 
 export interface ExtractedProblem {
   problemId: string;
@@ -112,26 +112,13 @@ export class ProblemSolver {
   private async answerProblem(problem: ExtractedProblem): Promise<void> {
     const llmConfig = config.getLlmConfig();
 
-    const openai = new OpenAI({
-      baseURL: llmConfig.baseUrl,
-      apiKey: llmConfig.apiKey,
-      dangerouslyAllowBrowser: true,
-    });
-
     log(`🧠 Sending problem ${problem.problemId} to LLM...`);
 
     let result: string[] = [];
 
     try {
-      const completion = await openai.chat.completions.create({
-        messages: [{ role: "system", content: buildPrompt(problem) }],
-        model: llmConfig.model,
-        thinking: { type: "enabled" },
-        reasoning_effort: llmConfig.reasoningEffort,
-        stream: false,
-      } as any);
-
-      const reply = completion.choices[0]?.message?.content || "[]";
+      const reply =
+        (await callLlm(llmConfig, { user: buildPrompt(problem) })).text || "[]";
       const match = reply.match(/\[.*\]/s);
       if (!match) {
         log(`⚠️ Could not parse JSON from LLM: ${reply}`);

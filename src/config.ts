@@ -7,7 +7,10 @@ interface AudioConfig {
   selected: string;
 }
 
-interface LlmConfig {
+export type LlmProvider = "openai" | "anthropic";
+
+export interface LlmConfig {
+  provider: LlmProvider;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -50,6 +53,7 @@ const DEFAULT_CONFIG: Config = {
     selected: "preset:0",
   },
   llm: {
+    provider: "openai",
     baseUrl: "",
     apiKey: "",
     model: "",
@@ -110,6 +114,7 @@ class ConfigManager {
         selected: loaded.audio?.selected ?? DEFAULT_CONFIG.audio.selected,
       },
       llm: {
+        provider: loaded.llm?.provider ?? DEFAULT_CONFIG.llm.provider,
         baseUrl: loaded.llm?.baseUrl ?? DEFAULT_CONFIG.llm.baseUrl,
         apiKey: loaded.llm?.apiKey ?? DEFAULT_CONFIG.llm.apiKey,
         model: loaded.llm?.model ?? DEFAULT_CONFIG.llm.model,
