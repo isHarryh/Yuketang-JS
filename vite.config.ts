@@ -14,6 +14,8 @@ export default defineConfig({
         license: "MIT",
         match: ["https://*.yuketang.cn/*"],
         grant: ["GM_notification", "unsafeWindow"],
+        // Slide images are downloaded via GM_xmlhttpRequest to bypass CORS
+        connect: ["yuketang.cn", "xuetangx.com", "*"],
         source: "https://github.com/isHarryh/Yuketang-JS",
         namespace: "https://www.yuketang.cn/",
         "run-at": "document-start",

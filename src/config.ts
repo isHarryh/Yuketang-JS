@@ -22,6 +22,7 @@ interface AutoAnswerConfig {
   timeLeftThreshold: number;
   timeAfterSend: number;
   confirmBeforeSubmit: boolean;
+  includeSlideImage: boolean;
 }
 
 interface EventListenersConfig {
@@ -64,6 +65,7 @@ const DEFAULT_CONFIG: Config = {
     timeLeftThreshold: 300,
     timeAfterSend: 10,
     confirmBeforeSubmit: false,
+    includeSlideImage: true,
   },
   eventListeners: {
     unlockProblem: true,
@@ -133,6 +135,9 @@ class ConfigManager {
         confirmBeforeSubmit:
           loaded.autoAnswer?.confirmBeforeSubmit ??
           DEFAULT_CONFIG.autoAnswer.confirmBeforeSubmit,
+        includeSlideImage:
+          loaded.autoAnswer?.includeSlideImage ??
+          DEFAULT_CONFIG.autoAnswer.includeSlideImage,
       },
       eventListeners: {
         unlockProblem:
