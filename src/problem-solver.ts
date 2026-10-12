@@ -6,7 +6,14 @@ import {
   getProblemTypeName,
   isShortAnswerProblem,
 } from "./problem-types.js";
-import { callLlm } from "./llm-client.js";
+import {
+  callLlm,
+  getLlmErrorStatus,
+  type LlmImage,
+  type LlmReply,
+} from "./llm-client.js";
+import { fetchSlideImage } from "./utils/slide-image.js";
+import { answerLog } from "./answer-log.js";
 
 export interface ExtractedProblem {
   problemId: string;
@@ -14,11 +21,12 @@ export interface ExtractedProblem {
   body: string;
   options?: { key: string; value: string }[];
   blanks?: { num: number }[];
+  slideImageUrl?: string;
   hasAutoAnswered?: boolean;
   autoAnswerInProgress?: boolean;
 }
 
-function buildPrompt(problem: ExtractedProblem): string {
+function buildPrompt(problem: ExtractedProblem, withImage: boolean): string {
   return `
 You are an expert answering a quiz question.
 Please analyze the following question and its options/blanks, and provide the correct answers.
@@ -28,6 +36,7 @@ Note:
 - In any situation, even if you don't have enough context or confidence to give the correct answer, you STILL need to provide a available answer.
 ${problem.options ? `- For single/multiple choice problems, you need to provide the option's code but not its description text.` : ""}
 ${problem.blanks ? `- Use the language the question used to fill in the blank.` : ""}
+${withImage ? `- The attached image is a screenshot of the slide containing this question. Use it as additional context (figures, formulas, tables), but treat the text below as the authoritative question.` : ""}
 
 Problem Type: ${getProblemTypeName(problem.problemType)}
 
@@ -41,6 +50,17 @@ ${problem.blanks ? `Blanks: ${problem.blanks.length} blanks to fill.` : ""}
 
 Now please provide the answer in the required JSON format.
 `;
+}
+
+// Client errors that may mean the model or proxy can't take image input
+function isRetryableWithoutImage(err: unknown): boolean {
+  const status = getLlmErrorStatus(err);
+  return (
+    status !== undefined &&
+    status >= 400 &&
+    status < 500 &&
+    ![401, 403, 429].includes(status)
+  );
 }
 
 export class ProblemSolver {
@@ -72,6 +92,9 @@ export class ProblemSolver {
     }
     problem.hasAutoAnswered = true;
     log(`⏭️ Skip auto answer for short-answer problem ${problemId}`);
+    answerLog.event(problem, "warning", "主观题需要手写拍照上传，不会自动提交", {
+      patch: { status: "skipped" },
+    });
     showToast(
       "warning",
       "自动答题",
@@ -98,6 +121,9 @@ export class ProblemSolver {
 
     if (!config.isLlmConfigAvailable()) {
       log(`❌ LLM configuration is missing or invalid. Please check settings.`);
+      answerLog.event(problem, "danger", "大模型配置缺失或不正确，未能自动答题", {
+        patch: { status: "failed" },
+      });
       return;
     }
 
@@ -109,33 +135,122 @@ export class ProblemSolver {
     }
   }
 
+  private async loadSlideImages(problem: ExtractedProblem): Promise<LlmImage[]> {
+    if (!config.getAutoAnswerConfig().includeSlideImage) {
+      return [];
+    }
+    if (!problem.slideImageUrl) {
+      log(`⚠️ No slide image URL for problem ${problem.problemId}`);
+      answerLog.event(problem, "warning", "没有找到题目所在页的 PPT 截图，只发送文字");
+      return [];
+    }
+    try {
+      const image = await fetchSlideImage(problem.slideImageUrl);
+      log(`🖼️ Slide image loaded for ${problem.problemId} (${image.width}x${image.height})`);
+      answerLog.event(
+        problem,
+        "info",
+        `已获取 PPT 截图（${image.width}×${image.height}，约 ${Math.round((image.data.length * 3) / 4 / 1024)} KB）`,
+      );
+      return [{ mediaType: image.mediaType, data: image.data }];
+    } catch (err: any) {
+      log(`⚠️ Failed to load slide image for ${problem.problemId}: ${err.message}`);
+      answerLog.event(problem, "warning", "获取 PPT 截图失败，只发送文字", {
+        detail: `${problem.slideImageUrl}\n${err.message}`,
+      });
+      return [];
+    }
+  }
+
+  private async askLlm(problem: ExtractedProblem): Promise<LlmReply> {
+    const llmConfig = config.getLlmConfig();
+    const images = await this.loadSlideImages(problem);
+
+    const send = async (withImages: boolean): Promise<LlmReply> => {
+      const prompt = buildPrompt(problem, withImages);
+      answerLog.event(
+        problem,
+        "info",
+        withImages ? "已把题目和 PPT 截图发给大模型" : "已把题目发给大模型",
+        { patch: { prompt, imageAttached: withImages } },
+      );
+      const startedAt = Date.now();
+      const reply = await callLlm(llmConfig, {
+        user: prompt,
+        images: withImages ? images : undefined,
+      });
+      answerLog.event(
+        problem,
+        "success",
+        `大模型已回复（用时 ${((Date.now() - startedAt) / 1000).toFixed(1)} 秒）`,
+        { patch: { reply: reply.text, reasoning: reply.reasoning } },
+      );
+      return reply;
+    };
+
+    if (images.length === 0) {
+      return send(false);
+    }
+    try {
+      return await send(true);
+    } catch (err: any) {
+      if (!isRetryableWithoutImage(err)) {
+        throw err;
+      }
+      log(`⚠️ LLM request with image failed, retrying without image: ${err.message}`);
+      answerLog.event(problem, "warning", "带截图的请求被拒绝（模型可能不支持图片），改为只发送文字重试", {
+        detail: err.message,
+      });
+      return send(false);
+    }
+  }
+
   private async answerProblem(problem: ExtractedProblem): Promise<void> {
     const llmConfig = config.getLlmConfig();
 
     log(`🧠 Sending problem ${problem.problemId} to LLM...`);
+    answerLog.event(problem, "info", "开始自动答题", {
+      patch: {
+        status: "running",
+        provider: llmConfig.provider,
+        model: llmConfig.model,
+      },
+    });
 
     let result: string[] = [];
 
     try {
-      const reply =
-        (await callLlm(llmConfig, { user: buildPrompt(problem) })).text || "[]";
+      const reply = (await this.askLlm(problem)).text || "[]";
       const match = reply.match(/\[.*\]/s);
       if (!match) {
         log(`⚠️ Could not parse JSON from LLM: ${reply}`);
+        answerLog.event(problem, "danger", "无法从回复中解析出 JSON 答案，请手动答题", {
+          patch: { status: "failed" },
+        });
         showToast("danger", "大模型", "大模型返回的结果无法解析，请手动答题");
         return;
       }
       const parsed: unknown = JSON.parse(match[0]);
       if (!Array.isArray(parsed)) {
         log(`⚠️ LLM JSON is not an array: ${reply}`);
+        answerLog.event(problem, "danger", "回复中的 JSON 不是数组，请手动答题", {
+          patch: { status: "failed" },
+        });
         showToast("danger", "大模型", "大模型返回的结果无法解析，请手动答题");
         return;
       }
       result = parsed.map((item) => String(item));
 
       log(`✅ LLM answered: ${JSON.stringify(result)}`);
+      answerLog.event(problem, "success", `解析出答案：${result.join(", ")}`, {
+        patch: { answer: result },
+      });
     } catch (err: any) {
       log(`❌ LLM Error: ${err.message}`);
+      answerLog.event(problem, "danger", "大模型调用出错，请手动答题", {
+        detail: err.message,
+        patch: { status: "failed" },
+      });
       showToast(
         "danger",
         "大模型",
@@ -145,12 +260,23 @@ export class ProblemSolver {
     }
 
     if (config.getAutoAnswerConfig().confirmBeforeSubmit) {
+      answerLog.event(problem, "info", "等待手动确认答案", {
+        patch: { status: "waiting-confirm" },
+      });
       const edited = await requestAnswerConfirmation(problem, result);
       if (edited === null) {
         problem.hasAutoAnswered = true;
         log(`🚫 User cancelled answer submission for ${problem.problemId}`);
+        answerLog.event(problem, "warning", "已取消提交", {
+          patch: { status: "cancelled" },
+        });
         showToast("info", "自动答题", "已取消提交，这道题不会再次自动答题");
         return;
+      }
+      if (JSON.stringify(edited) !== JSON.stringify(result)) {
+        answerLog.event(problem, "info", `答案已手动改为：${edited.join(", ")}`, {
+          patch: { answer: edited },
+        });
       }
       result = edited;
     } else {
@@ -177,6 +303,9 @@ export class ProblemSolver {
         dt: Date.now(),
         result: result,
       };
+      answerLog.event(problem, "info", "正在向雨课堂提交答案", {
+        detail: JSON.stringify(payload, null, 2),
+      });
 
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
@@ -208,11 +337,19 @@ export class ProblemSolver {
       const data = await response.json();
       if (data.code === 0) {
         log(`✅ Answer for problem ${problemId} accepted by server.`);
+        answerLog.event(problem, "success", "雨课堂已接收答案", {
+          detail: JSON.stringify(data, null, 2),
+          patch: { status: "success" },
+        });
         showToast("success", "自动答题", "自动答题发送成功");
       } else {
         log(
           `⚠️ Answer for problem ${problemId} submitted but rejected by server. Response: ${JSON.stringify(data)}`,
         );
+        answerLog.event(problem, "danger", `雨课堂拒绝了答案：${data.msg}`, {
+          detail: JSON.stringify(data, null, 2),
+          patch: { status: "failed" },
+        });
         showToast(
           "warning",
           "自动答题",
@@ -224,6 +361,10 @@ export class ProblemSolver {
       log(
         `❌ Failed to submit answer for problem ${problemId}: ${err.message}`,
       );
+      answerLog.event(problem, "danger", "提交答案失败", {
+        detail: err.message,
+        patch: { status: "failed" },
+      });
       showToast("danger", "自动答题", `自动答题发送失败，因为 ${err.message}`);
     }
   }

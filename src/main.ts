@@ -15,6 +15,7 @@ import { showToast } from "./ui/banner.js";
 import { problemSolver } from "./problem-solver.js";
 import { isShortAnswerProblem } from "./problem-types.js";
 import { config } from "./config.js";
+import { answerLog } from "./answer-log.js";
 
 (function (): void {
   "use strict";
@@ -33,7 +34,12 @@ import { config } from "./config.js";
             hasAutoAnswered: false,
             options: p.options,
             blanks: p.blanks,
+            // Rendered image of the slide; field names are not documented, so try both
+            slideImageUrl: slide.cover || slide.thumbnail || undefined,
           };
+          if (!extracted.slideImageUrl) {
+            log(`⚠️ No slide image for problem ${p.problemId}, slide keys: ${Object.keys(slide).join(", ")}`);
+          }
           problemSolver.addProblem(p.problemId, extracted);
           count++;
         }
@@ -75,6 +81,12 @@ import { config } from "./config.js";
         delayMs = Math.max(0, numLimit - aaConfig.timeLeftThreshold) * 1000;
       }
       log(`🕒 Will run auto answer for ${problemId} in ${delayMs}ms`);
+      answerLog.event(
+        problem,
+        "info",
+        `题目已解锁（限时 ${isNaN(numLimit) || numLimit <= 0 ? "无" : `${numLimit} 秒`}），${delayMs / 1000} 秒后自动答题`,
+        { patch: { status: "scheduled" } },
+      );
 
       if (delayMs > 0) {
         showToast(

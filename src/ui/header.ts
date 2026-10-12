@@ -4,12 +4,14 @@ import { log } from "../utils/log.js";
 import { notify } from "../utils/notify.js";
 import { audioController } from "../utils/audio-controller.js";
 import { settingsModal } from "./settings-modal.js";
+import { openAnswerLog } from "./answer-log-modal.js";
 
 export class LessonHeaderUI {
   private $container: JQuery | null;
   private $statusText: JQuery | null;
   private $notifyBtn: JQuery | null;
   private $settingsBtn: JQuery | null;
+  private $logBtn: JQuery | null;
   private lastActiveTime: number | null;
 
   constructor() {
@@ -17,6 +19,7 @@ export class LessonHeaderUI {
     this.$statusText = null;
     this.$notifyBtn = null;
     this.$settingsBtn = null;
+    this.$logBtn = null;
     this.lastActiveTime = null; // null means never active
   }
 
@@ -54,6 +57,7 @@ export class LessonHeaderUI {
       this.$statusText = this.$container.find("#yuketang-js-status-text");
       this.$notifyBtn = this.$container.find("#yuketang-js-test-notification");
       this.$settingsBtn = this.$container.find("#yuketang-js-settings-btn");
+      this.$logBtn = this.$container.find("#yuketang-js-answer-log-btn");
       return;
     }
 
@@ -80,9 +84,18 @@ export class LessonHeaderUI {
       settingsModal.open();
     });
 
+    this.$logBtn = $(
+      '<button id="yuketang-js-answer-log-btn" class="btn btn-sm btn-secondary"></button>',
+    );
+    this.$logBtn.text("答题日志");
+    this.$logBtn.on("click", () => {
+      openAnswerLog();
+    });
+
     this.$container
       .append(this.$statusText)
       .append(this.$notifyBtn)
+      .append(this.$logBtn)
       .append(this.$settingsBtn);
     $header.append(this.$container);
 

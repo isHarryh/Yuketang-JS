@@ -7,6 +7,7 @@ import { config, type LlmProvider } from "../config.js";
 import { FINGERPRINT_OPTIONS } from "../constants.js";
 import { showToast } from "./banner.js";
 import { callLlm } from "../llm-client.js";
+import { openAnswerLog } from "./answer-log-modal.js";
 
 export function showStaleConfigWarning(): void {
   const modalId = "yuketang-js-stale-config-modal";
@@ -212,13 +213,21 @@ class SettingsModal {
                         <label class="form-check-label" for="yuketang-js-aa-confirm">提交前手动确认</label>
                         <div class="form-text">开启后，大模型返回答案时先弹出确认框，可以修改后再提交。关闭则直接提交。主观题（简答）始终跳过。</div>
                       </div>
+                      <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="yuketang-js-aa-slide-image">
+                        <label class="form-check-label" for="yuketang-js-aa-slide-image">同时发送题目所在页的 PPT 截图</label>
+                        <div class="form-text">需要模型支持图片输入。如果带截图的请求被拒绝，会自动改为只发送文字重试。</div>
+                      </div>
                       <div class="mb-2">
                         <label for="yuketang-js-aa-time-left" class="form-label fw-medium mb-1">限时题目在截止前多少秒启动自动答题</label>
                         <input type="number" class="form-control form-control-sm" id="yuketang-js-aa-time-left" value="30">
                       </div>
-                      <div class="mb-0">
+                      <div class="mb-2">
                         <label for="yuketang-js-aa-time-after" class="form-label fw-medium mb-1">不限时题目在收到题目后多少秒启动自动答题</label>
                         <input type="number" class="form-control form-control-sm" id="yuketang-js-aa-time-after" value="15">
+                      </div>
+                      <div class="mb-0">
+                        <button id="yuketang-js-aa-open-log" class="btn btn-sm btn-outline-primary">查看答题日志</button>
                       </div>
                     </div>
                   </div>
@@ -327,11 +336,13 @@ class SettingsModal {
     const aaConfig = config.getAutoAnswerConfig();
     const $enabled = $("#yuketang-js-aa-enabled");
     const $confirm = $("#yuketang-js-aa-confirm");
+    const $slideImage = $("#yuketang-js-aa-slide-image");
     const $timeLeft = $("#yuketang-js-aa-time-left");
     const $timeAfter = $("#yuketang-js-aa-time-after");
 
     $enabled.prop("checked", aaConfig.enabled);
     $confirm.prop("checked", aaConfig.confirmBeforeSubmit);
+    $slideImage.prop("checked", aaConfig.includeSlideImage);
     $timeLeft.val(aaConfig.timeLeftThreshold);
     $timeAfter.val(aaConfig.timeAfterSend);
 
@@ -339,6 +350,7 @@ class SettingsModal {
       config.setAutoAnswerConfig({
         enabled: Boolean($enabled.prop("checked")),
         confirmBeforeSubmit: Boolean($confirm.prop("checked")),
+        includeSlideImage: Boolean($slideImage.prop("checked")),
         timeLeftThreshold: parseInt($timeLeft.val() as string, 10) || 30,
         timeAfterSend: parseInt($timeAfter.val() as string, 10) || 15,
       });
@@ -346,8 +358,18 @@ class SettingsModal {
 
     $enabled.on("change", updateConfig);
     $confirm.on("change", updateConfig);
+    $slideImage.on("change", updateConfig);
     $timeLeft.on("change", updateConfig);
     $timeAfter.on("change", updateConfig);
+
+    $("#yuketang-js-aa-open-log").on("click", () => {
+      // Avoid stacking two Bootstrap modals
+      const settingsEl = this.$modal?.[0];
+      if (settingsEl) {
+        bootstrap.Modal.getInstance(settingsEl)?.hide();
+      }
+      openAnswerLog();
+    });
   }
 
   private _populateLlmOptions(): void {
