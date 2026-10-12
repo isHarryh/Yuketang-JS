@@ -68,7 +68,7 @@ import { answerLog } from "./answer-log.js";
 
     if (aaConfig.enabled && problem && !problem.hasAutoAnswered) {
       if (isShortAnswerProblem(problem.problemType)) {
-        problemSolver.skipShortAnswer(problemId);
+        problemSolver.handleShortAnswer(problemId);
         return;
       }
 
