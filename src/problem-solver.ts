@@ -1,6 +1,11 @@
 import { config } from "./config.js";
 import { log } from "./utils/log.js";
 import { showToast } from "./ui/banner.js";
+import { requestAnswerConfirmation } from "./ui/answer-confirm-modal.js";
+import {
+  getProblemTypeName,
+  isShortAnswerProblem,
+} from "./problem-types.js";
 import OpenAI from "openai";
 
 export interface ExtractedProblem {
@@ -10,48 +15,11 @@ export interface ExtractedProblem {
   options?: { key: string; value: string }[];
   blanks?: { num: number }[];
   hasAutoAnswered?: boolean;
+  autoAnswerInProgress?: boolean;
 }
 
-export class ProblemSolver {
-  private problemsDict: Map<string, ExtractedProblem>;
-
-  constructor() {
-    this.problemsDict = new Map<string, ExtractedProblem>();
-  }
-
-  addProblem(problemId: string, problem: ExtractedProblem) {
-    this.problemsDict.set(problemId, problem);
-  }
-
-  getProblem(problemId: string): ExtractedProblem | undefined {
-    return this.problemsDict.get(problemId);
-  }
-
-  getProblemCount(): number {
-    return this.problemsDict.size;
-  }
-
-  async handleProblem(problemId: string): Promise<void> {
-    const problem = this.getProblem(problemId);
-    if (!problem) {
-      log(`❌ Problem ${problemId} not found in memory`);
-      return;
-    }
-
-    if (!config.isLlmConfigAvailable()) {
-      log(`❌ LLM configuration is missing or invalid. Please check settings.`);
-      return;
-    }
-
-    const llmConfig = config.getLlmConfig();
-
-    const openai = new OpenAI({
-      baseURL: llmConfig.baseUrl,
-      apiKey: llmConfig.apiKey,
-      dangerouslyAllowBrowser: true,
-    });
-
-    const prompt = `
+function buildPrompt(problem: ExtractedProblem): string {
+  return `
 You are an expert answering a quiz question.
 Please analyze the following question and its options/blanks, and provide the correct answers.
 
@@ -73,14 +41,90 @@ ${problem.blanks ? `Blanks: ${problem.blanks.length} blanks to fill.` : ""}
 
 Now please provide the answer in the required JSON format.
 `;
+}
 
-    log(`🧠 Sending problem ${problemId} to LLM...`);
+export class ProblemSolver {
+  private problemsDict: Map<string, ExtractedProblem>;
+
+  constructor() {
+    this.problemsDict = new Map<string, ExtractedProblem>();
+  }
+
+  addProblem(problemId: string, problem: ExtractedProblem) {
+    this.problemsDict.set(problemId, problem);
+  }
+
+  getProblem(problemId: string): ExtractedProblem | undefined {
+    return this.problemsDict.get(problemId);
+  }
+
+  getProblemCount(): number {
+    return this.problemsDict.size;
+  }
+
+  /**
+   * Short-answer problems need a handwritten photo upload, so they are never submitted.
+   */
+  skipShortAnswer(problemId: string): void {
+    const problem = this.getProblem(problemId);
+    if (!problem || problem.hasAutoAnswered) {
+      return;
+    }
+    problem.hasAutoAnswered = true;
+    log(`⏭️ Skip auto answer for short-answer problem ${problemId}`);
+    showToast(
+      "warning",
+      "自动答题",
+      "这是主观题（简答），需要手写并拍照上传，已跳过自动答题",
+    );
+  }
+
+  async handleProblem(problemId: string): Promise<void> {
+    const problem = this.getProblem(problemId);
+    if (!problem) {
+      log(`❌ Problem ${problemId} not found in memory`);
+      return;
+    }
+
+    if (isShortAnswerProblem(problem.problemType)) {
+      this.skipShortAnswer(problemId);
+      return;
+    }
+
+    if (problem.hasAutoAnswered || problem.autoAnswerInProgress) {
+      log(`⏭️ Skip auto answer for ${problemId} because it is already handled or in progress`);
+      return;
+    }
+
+    if (!config.isLlmConfigAvailable()) {
+      log(`❌ LLM configuration is missing or invalid. Please check settings.`);
+      return;
+    }
+
+    problem.autoAnswerInProgress = true;
+    try {
+      await this.answerProblem(problem);
+    } finally {
+      problem.autoAnswerInProgress = false;
+    }
+  }
+
+  private async answerProblem(problem: ExtractedProblem): Promise<void> {
+    const llmConfig = config.getLlmConfig();
+
+    const openai = new OpenAI({
+      baseURL: llmConfig.baseUrl,
+      apiKey: llmConfig.apiKey,
+      dangerouslyAllowBrowser: true,
+    });
+
+    log(`🧠 Sending problem ${problem.problemId} to LLM...`);
 
     let result: string[] = [];
 
     try {
       const completion = await openai.chat.completions.create({
-        messages: [{ role: "system", content: prompt }],
+        messages: [{ role: "system", content: buildPrompt(problem) }],
         model: llmConfig.model,
         thinking: { type: "enabled" },
         reasoning_effort: llmConfig.reasoningEffort,
@@ -88,22 +132,21 @@ Now please provide the answer in the required JSON format.
       } as any);
 
       const reply = completion.choices[0]?.message?.content || "[]";
-      // Try to extract JSON array
       const match = reply.match(/\[.*\]/s);
-      if (match) {
-        result = JSON.parse(match[0]);
-      } else {
+      if (!match) {
         log(`⚠️ Could not parse JSON from LLM: ${reply}`);
         showToast("danger", "大模型", "大模型返回的结果无法解析，请手动答题");
         return;
       }
+      const parsed: unknown = JSON.parse(match[0]);
+      if (!Array.isArray(parsed)) {
+        log(`⚠️ LLM JSON is not an array: ${reply}`);
+        showToast("danger", "大模型", "大模型返回的结果无法解析，请手动答题");
+        return;
+      }
+      result = parsed.map((item) => String(item));
 
       log(`✅ LLM answered: ${JSON.stringify(result)}`);
-      showToast(
-        "success",
-        "大模型",
-        `大模型返回的答案是：${result.join(", ")}`,
-      );
     } catch (err: any) {
       log(`❌ LLM Error: ${err.message}`);
       showToast(
@@ -114,6 +157,31 @@ Now please provide the answer in the required JSON format.
       return;
     }
 
+    if (config.getAutoAnswerConfig().confirmBeforeSubmit) {
+      const edited = await requestAnswerConfirmation(problem, result);
+      if (edited === null) {
+        problem.hasAutoAnswered = true;
+        log(`🚫 User cancelled answer submission for ${problem.problemId}`);
+        showToast("info", "自动答题", "已取消提交，这道题不会再次自动答题");
+        return;
+      }
+      result = edited;
+    } else {
+      showToast(
+        "success",
+        "大模型",
+        `大模型返回的答案是：${result.join(", ")}`,
+      );
+    }
+
+    await this.submitAnswer(problem, result);
+  }
+
+  private async submitAnswer(
+    problem: ExtractedProblem,
+    result: string[],
+  ): Promise<void> {
+    const problemId = problem.problemId;
     log(`📤 Submitting answer for ${problemId}...`);
     try {
       const payload = {
@@ -171,19 +239,6 @@ Now please provide the answer in the required JSON format.
       );
       showToast("danger", "自动答题", `自动答题发送失败，因为 ${err.message}`);
     }
-  }
-}
-
-function getProblemTypeName(type: number): string {
-  switch (type) {
-    case 1:
-      return "Single choice";
-    case 2:
-      return "Multiple choice";
-    case 4:
-      return "Fill in the blank";
-    default:
-      return "Unknown";
   }
 }
 

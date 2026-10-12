@@ -207,6 +207,11 @@ class SettingsModal {
                         <input class="form-check-input" type="checkbox" role="switch" id="yuketang-js-aa-enabled">
                         <label class="form-check-label" for="yuketang-js-aa-enabled">启用自动答题（需要配置正确的大模型设置）</label>
                       </div>
+                      <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="yuketang-js-aa-confirm">
+                        <label class="form-check-label" for="yuketang-js-aa-confirm">提交前手动确认</label>
+                        <div class="form-text">开启后，大模型返回答案时先弹出确认框，可以修改后再提交。关闭则直接提交。主观题（简答）始终跳过。</div>
+                      </div>
                       <div class="mb-2">
                         <label for="yuketang-js-aa-time-left" class="form-label fw-medium mb-1">限时题目在截止前多少秒启动自动答题</label>
                         <input type="number" class="form-control form-control-sm" id="yuketang-js-aa-time-left" value="30">
@@ -314,22 +319,26 @@ class SettingsModal {
   private _populateAutoAnswerOptions(): void {
     const aaConfig = config.getAutoAnswerConfig();
     const $enabled = $("#yuketang-js-aa-enabled");
+    const $confirm = $("#yuketang-js-aa-confirm");
     const $timeLeft = $("#yuketang-js-aa-time-left");
     const $timeAfter = $("#yuketang-js-aa-time-after");
 
     $enabled.prop("checked", aaConfig.enabled);
+    $confirm.prop("checked", aaConfig.confirmBeforeSubmit);
     $timeLeft.val(aaConfig.timeLeftThreshold);
     $timeAfter.val(aaConfig.timeAfterSend);
 
     const updateConfig = () => {
       config.setAutoAnswerConfig({
         enabled: Boolean($enabled.prop("checked")),
+        confirmBeforeSubmit: Boolean($confirm.prop("checked")),
         timeLeftThreshold: parseInt($timeLeft.val() as string, 10) || 30,
         timeAfterSend: parseInt($timeAfter.val() as string, 10) || 15,
       });
     };
 
     $enabled.on("change", updateConfig);
+    $confirm.on("change", updateConfig);
     $timeLeft.on("change", updateConfig);
     $timeAfter.on("change", updateConfig);
   }
