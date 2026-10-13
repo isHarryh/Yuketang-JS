@@ -39,6 +39,7 @@ interface CheckinConfig {
   autoRefreshEnabled: boolean;
   autoRefreshInterval: number;
   autoCheckinAudit: boolean;
+  testOpenWaitSeconds: number;
 }
 
 interface Config {
@@ -81,6 +82,7 @@ const DEFAULT_CONFIG: Config = {
     autoRefreshEnabled: false,
     autoRefreshInterval: 30,
     autoCheckinAudit: false,
+    testOpenWaitSeconds: 6,
   },
   hash: "",
 };
@@ -174,6 +176,9 @@ class ConfigManager {
         autoCheckinAudit:
           loaded.checkin?.autoCheckinAudit ??
           DEFAULT_CONFIG.checkin.autoCheckinAudit,
+        testOpenWaitSeconds:
+          loaded.checkin?.testOpenWaitSeconds ??
+          DEFAULT_CONFIG.checkin.testOpenWaitSeconds,
       },
       hash: loaded.hash ?? "",
     };

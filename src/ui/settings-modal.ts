@@ -158,8 +158,18 @@ class SettingsModal {
                       </div>
                     </div>
                     <div class="rounded px-3 py-2 mb-3" style="background: #f8f9fa;">
-                      <div class="form-text mb-2">浏览器可能会阻止打开课堂页面，建议您点击下方按钮进行测试</div>
+                      <div class="form-text mb-2">浏览器可能不允许脚本在无人操作时自动打开课堂页面，这会导致自动签到失效。点击下方按钮会在等待数秒后模拟这一真实场景进行测试</div>
+                      <div class="mb-2">
+                        <label for="yuketang-js-checkin-test-wait" class="form-label fw-medium mb-1">测试等待秒数</label>
+                        <input type="number" class="form-control form-control-sm" id="yuketang-js-checkin-test-wait" value="6">
+                      </div>
                       <button id="yuketang-js-checkin-test-open" class="btn btn-sm btn-primary">测试打开新页面</button>
+                      <div id="yuketang-js-checkin-test-result" class="d-none mt-2">
+                        <div id="yuketang-js-checkin-test-alert" class="alert mb-0 py-2 px-3" role="alert">
+                          <strong id="yuketang-js-checkin-test-status" class="small"></strong>
+                          <div id="yuketang-js-checkin-test-detail" class="small mt-1" style="white-space: pre-wrap;"></div>
+                        </div>
+                      </div>
                     </div>
                     <div class="rounded px-3 py-2 mb-3" style="background: #f8f9fa;">
                       <a class="d-flex justify-content-between align-items-center text-decoration-none text-body user-select-none"
@@ -529,6 +539,7 @@ class SettingsModal {
     const $autoRefresh = $("#yuketang-js-checkin-auto-refresh");
     const $refreshInterval = $("#yuketang-js-checkin-refresh-interval");
     const $audit = $("#yuketang-js-checkin-audit");
+    const $testWait = $("#yuketang-js-checkin-test-wait");
 
     // Populate fingerprint dropdown
     FINGERPRINT_OPTIONS.forEach((opt) => {
@@ -541,6 +552,7 @@ class SettingsModal {
     $autoRefresh.prop("checked", checkinConfig.autoRefreshEnabled);
     $refreshInterval.val(checkinConfig.autoRefreshInterval);
     $audit.prop("checked", checkinConfig.autoCheckinAudit);
+    $testWait.val(checkinConfig.testOpenWaitSeconds);
 
     const updateConfig = () => {
       config.setCheckinConfig({
@@ -551,6 +563,7 @@ class SettingsModal {
         autoRefreshInterval:
           parseInt($refreshInterval.val() as string, 10) || 5,
         autoCheckinAudit: Boolean($audit.prop("checked")),
+        testOpenWaitSeconds: parseInt($testWait.val() as string, 10) || 6,
       });
     };
 
@@ -560,6 +573,7 @@ class SettingsModal {
     $autoRefresh.on("change", updateConfig);
     $refreshInterval.on("change", updateConfig);
     $audit.on("change", updateConfig);
+    $testWait.on("change", updateConfig);
 
     const $reloadHint = $("#yuketang-js-checkin-reload-hint");
     const showReloadHint = () => $reloadHint.removeClass("d-none");
@@ -583,14 +597,87 @@ class SettingsModal {
       $chevron.css("transform", "rotate(0deg)");
     });
 
-    $("#yuketang-js-checkin-test-open").on("click", () => {
-      window.open("/lesson/fullscreen/v3", "_blank");
-      showToast(
-        "info",
-        "自动签到",
-        "已请求打开新页面用于测试，如果您没有看到有新页面打开，请检查浏览器的拦截提示；如果新页面已正常打开，则没有问题，您可将其关闭",
-        0,
+    // Test opening the classroom page the same way the auto check-in does:
+    // without a user gesture. The transient user activation granted by the
+    // click expires within a few seconds, so the test waits for that first;
+    // otherwise the popup would never be blocked and the test would be useless.
+    const $testOpenBtn = $("#yuketang-js-checkin-test-open");
+    const $testResult = $("#yuketang-js-checkin-test-result");
+    const $testAlert = $("#yuketang-js-checkin-test-alert");
+    const $testStatus = $("#yuketang-js-checkin-test-status");
+    const $testDetail = $("#yuketang-js-checkin-test-detail");
+
+    const showCheckinTestResult = (
+      level: "success" | "warning" | "danger",
+      status: string,
+      detail: string,
+    ) => {
+      $testAlert.removeClass("alert-success alert-warning alert-danger");
+      $testAlert.addClass(`alert-${level}`);
+      $testStatus.text(status);
+      $testDetail.text(detail);
+      $testResult.removeClass("d-none");
+    };
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    $testOpenBtn.on("click", async () => {
+      const configuredWait = parseInt($testWait.val() as string, 10);
+      const waitSeconds = configuredWait > 0 ? configuredWait : 6;
+      $testOpenBtn.prop("disabled", true);
+      showCheckinTestResult(
+        "warning",
+        "测试进行中",
+        `将在 ${waitSeconds} 秒后模拟无人操作的场景打开新页面，期间请不要点击或操作页面。`,
       );
+
+      for (let left = waitSeconds; left > 0; left--) {
+        $testOpenBtn.text(`测试中…（${left}）`);
+        await sleep(1000);
+      }
+
+      // In case the user is still interacting with the page, wait until the
+      // transient user activation has really expired.
+      while ((navigator as any).userActivation?.isActive) {
+        await sleep(500);
+      }
+
+      let popup: Window | null = null;
+      try {
+        popup = window.open("/lesson/fullscreen/v3", "_blank");
+      } catch {
+        popup = null;
+      }
+
+      $testOpenBtn.prop("disabled", false);
+      $testOpenBtn.text("测试打开新页面");
+
+      if (popup) {
+        showCheckinTestResult(
+          "success",
+          "测试通过",
+          "浏览器允许脚本在无人操作的情况下打开新页面，自动签到应该可以正常工作。您可以关闭弹出的测试页面。",
+        );
+        log("✅ Check-in popup test passed");
+      } else {
+        const isFirefox = navigator.userAgent.includes("Firefox");
+        const hint = isFirefox
+          ? `请在 Firefox 的「隐私与安全 → 权限 → 阻止弹出式窗口 → 例外…」中允许 ${location.origin} 后重新测试`
+          : `请在「网站设置 → 弹出式窗口和重定向 → 允许」中添加 ${location.origin} 后重新测试`;
+        showCheckinTestResult(
+          "danger",
+          "测试未通过",
+          `浏览器拦截了脚本自动打开页面。${hint}`,
+        );
+        showToast(
+          "warning",
+          "自动签到",
+          "浏览器拦截了脚本打开新页面，请按设置页提示放行后重试",
+          0,
+        );
+        log("❌ Check-in popup test failed");
+      }
     });
 
     $("#yuketang-js-checkin-clear-cache").on("click", () => {
